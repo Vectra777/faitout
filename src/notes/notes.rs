@@ -6,11 +6,15 @@ use iced::widget::{
 };
 use iced::{Color, Element, Length, Theme, alignment::Alignment};
 use iced::{Shadow, border};
+use serde::{Serialize, Deserialize};
+use std::fs::{self, File};
+use std::io::{self, BufReader, BufWriter};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(300);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NoteColor {
     Default,
     Cherry,
@@ -53,13 +57,14 @@ impl NoteColor {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Note {
     pub title: String,
     pub body: String,
     pub tags: Vec<String>,
     pub color: NoteColor,
-    parsed: Vec<Item>,
+    #[serde(skip, default)]
+    parsed: Vec<Item>, // not persisted; rebuilt from body
 }
 
 impl Note {
@@ -97,12 +102,16 @@ impl Default for Note {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Notes {
+    #[serde(skip, default)]
     selected: Option<usize>,
     entries: Vec<Note>,
+    #[serde(skip, default)]
     search: String,
+    #[serde(skip, default)]
     color_menu: Option<usize>,
+    #[serde(skip, default)]
     last_click: Option<(usize, Instant)>,
 }
 
@@ -115,6 +124,8 @@ pub enum Message {
     ColorPicked { index: usize, color: NoteColor },
     DeleteRequested(usize),
     SearchChanged(String),
+    OpenSettings,
+    OpenInNewWindow(usize),
 }
 
 #[derive(Debug, Clone)]
@@ -122,9 +133,77 @@ pub enum Event {
     Edit(usize),
     Create,
     Delete(usize),
+    OpenSettings,
+    OpenInNewWindow(usize),
 }
 
 impl Notes {
+    pub fn load() -> Self {
+        match Self::load_from_disk() {
+            Ok(mut notes) => {
+                // Refresh parsed markdown for all notes
+                for note in &mut notes.entries {
+                    note.refresh_parsed();
+                }
+                notes
+            }
+            Err(error) => {
+                eprintln!("Failed to load notes from disk: {error}");
+                Self::default_values()
+            }
+        }
+    }
+
+    fn default_values() -> Self {
+        Self {
+            selected: None,
+            entries: Vec::new(),
+            search: String::new(),
+            color_menu: None,
+            last_click: None,
+        }
+    }
+
+    fn persist(&self) {
+        if let Err(error) = self.save_to_disk() {
+            eprintln!("Failed to save notes: {error}");
+        }
+    }
+
+    fn save_to_disk(&self) -> io::Result<()> {
+        let path = Self::storage_path();
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent)?;
+            }
+        }
+
+        let file = File::create(path)?;
+        let writer = BufWriter::new(file);
+        serde_json::to_writer_pretty(writer, self)
+            .map_err(|error| io::Error::new(io::ErrorKind::Other, error))
+    }
+
+    fn load_from_disk() -> io::Result<Self> {
+        let path = Self::storage_path();
+        if !path.exists() {
+            return Ok(Self::default_values());
+        }
+
+        let file = File::open(path)?;
+        let reader = BufReader::new(file);
+        serde_json::from_reader(reader)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+    }
+
+    fn storage_path() -> PathBuf {
+        PathBuf::from("notes.json")
+    }
+
+    fn changed(&mut self) {
+        self.persist();
+    }
+
     pub fn update(&mut self, message: Message) -> Option<Event> {
         match message {
             Message::NoteClicked(index) => {
@@ -153,6 +232,9 @@ impl Notes {
                 self.last_click = None;
                 Some(Event::Create)
             }
+            Message::OpenSettings => {
+                Some(Event::OpenSettings)
+            }
             Message::LinkClicked => None,
             Message::ToggleColorMenu(index) => {
                 self.color_menu = if self.color_menu == Some(index) {
@@ -167,6 +249,7 @@ impl Notes {
                     note.set_color(color);
                 }
                 self.color_menu = None;
+                self.changed();
                 None
             }
             Message::DeleteRequested(index) => {
@@ -175,6 +258,7 @@ impl Notes {
                     self.adjust_after_remove(index);
                     self.color_menu = None;
                     self.last_click = None;
+                    self.changed();
                     Some(Event::Delete(index))
                 } else {
                     None
@@ -186,6 +270,7 @@ impl Notes {
                 self.last_click = None;
                 None
             }
+            Message::OpenInNewWindow(index) => Some(Event::OpenInNewWindow(index)),
         }
     }
 
@@ -214,6 +299,7 @@ impl Notes {
             text("Notebook").size(32),
             horizontal_space().width(Length::Fill),
             button(text("New page")).on_press(Message::CreateNew),
+            button(text("Settings")).on_press(Message::OpenSettings),
         ]
         .align_y(Alignment::Center)
         .spacing(12);
@@ -247,10 +333,13 @@ impl Notes {
                     })
                     .size(26),
                     horizontal_space().width(Length::Fill),
-                    button(text("🌈").size(18))
+                    button(text("Open in new window").size(18))
+                        .on_press(Message::OpenInNewWindow(index))
+                        .padding([6, 10]),
+                    button(text("colors").size(18))
                         .on_press(Message::ToggleColorMenu(index))
                         .padding([6, 10]),
-                    button(text("🗑️").size(18))
+                    button(text("trash").size(18))
                         .on_press(Message::DeleteRequested(index))
                         .padding([6, 10]),
                 ]
@@ -344,15 +433,18 @@ impl Notes {
             if let Some(slot) = self.entries.get_mut(index) {
                 note.color = slot.color;
                 *slot = note;
+                self.changed();
                 index
             } else {
                 let index = self.entries.len();
                 self.entries.push(note);
+                self.changed();
                 index
             }
         } else {
             let index = self.entries.len();
             self.entries.push(note);
+            self.changed();
             index
         }
     }
@@ -377,6 +469,18 @@ impl Notes {
                 self.color_menu = Some(menu - 1);
             }
         }
+    }
+}
+
+impl Default for Notes {
+    fn default() -> Self {
+        Self::load()
+    }
+}
+
+impl Note {
+    fn refresh_parsed(&mut self) {
+        self.parsed = markdown::parse(self.body.as_str()).collect();
     }
 }
 
