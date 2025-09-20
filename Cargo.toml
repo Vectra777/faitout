@@ -2,8 +2,15 @@
 name = "faitout"
 version = "0.1.0"
 edition = "2024"
+build = "build.rs"
 
 [dependencies]
-iced = { version = "0.13.1", features = ["markdown"] }
+iced = { version = "0.13.1", features = ["markdown", "image"] }
 serde = { version = "1.0.225", features = ["derive"] }
 serde_json = "1.0"
+
+[build-dependencies]
+winres = { version = "0.1", optional = true }
+
+[features]
+embed-icon = ["winres"]

@@ -1,6 +1,7 @@
 use editor::editor::{Editor, Event as EditorEvent, Message as EditorMessage};
 use iced::Element;
 use iced::window;
+use iced::window::icon;
 use iced::{Task, Length};
 use iced::widget::{column, container, scrollable, text};
 use iced::widget::markdown::{self, Settings as MdSettings, Style as MdStyle};
@@ -32,8 +33,12 @@ fn main() -> iced::Result {
         .subscription(|_app: &App| window::close_events().map(Message::WindowClosed))
         .run_with(|| {
             let mut app = App::default();
-            // Open the main window on startup
-            let (id, task) = window::open(window::Settings::default());
+            // Open the main window on startup with icon
+            let settings = window::Settings {
+                icon: load_app_icon(),
+                ..Default::default()
+            };
+            let (id, task) = window::open(settings);
             app.state.windows.insert(id, WindowView::Main);
             (app, task.map(Message::WindowOpened))
         })
@@ -136,7 +141,11 @@ impl App {
                             Task::none()
                         }
                         NotesEvent::OpenInNewWindow(index) => {
-                            let (id, task) = window::open(window::Settings::default());
+                            let settings = window::Settings {
+                                icon: load_app_icon(),
+                                ..Default::default()
+                            };
+                            let (id, task) = window::open(settings);
                             self.state.windows.insert(id, WindowView::Note(index));
                             task.map(Message::WindowOpened)
                         }
@@ -198,6 +207,16 @@ impl App {
         } else {
             container(text("Note not found").size(16)).padding(24).into()
         }
+    }
+}
+
+fn load_app_icon() -> Option<window::Icon> {
+    // Prefer .ico on Windows, fallback to .png if available
+    // Paths are relative to the current working directory
+    let ico = icon::from_file("assets/icon.ico");
+    match ico {
+        Ok(icon) => Some(icon),
+        Err(_) => icon::from_file("assets/icon.png").ok(),
     }
 }
 
