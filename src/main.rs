@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 use editor::editor::{Editor, Event as EditorEvent, Message as EditorMessage};
 use iced::Element;
 use iced::window;
@@ -33,7 +35,6 @@ fn main() -> iced::Result {
         .subscription(|_app: &App| window::close_events().map(Message::WindowClosed))
         .run_with(|| {
             let mut app = App::default();
-            // Open the main window on startup with icon
             let settings = window::Settings {
                 icon: load_app_icon(),
                 ..Default::default()

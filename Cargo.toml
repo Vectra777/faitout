@@ -14,3 +14,6 @@ winres = { version = "0.1", optional = true }
 
 [features]
 embed-icon = ["winres"]
+
+[package.metadata.windows]
+subsystem = "windows"
