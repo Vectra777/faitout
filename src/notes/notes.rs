@@ -141,7 +141,6 @@ impl Notes {
     pub fn load() -> Self {
         match Self::load_from_disk() {
             Ok(mut notes) => {
-                // Refresh parsed markdown for all notes
                 for note in &mut notes.entries {
                     note.refresh_parsed();
                 }
